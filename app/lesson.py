@@ -15,6 +15,8 @@ short Dutch news article from NOS.nl. Turn it into a structured, friendly,
 self-study lesson in English with this layout, in order (learn words and
 grammar first, read the article last):
 1) Key Vocabulary   2) Grammar Points   3) Word building   4) Article paragraphs.
+Top of the JSON: title_translation = the natural English translation of the
+Dutch headline (shown under the headline at the very top of the lesson).
 
 Rules:
 - NEVER use emoji or decorative symbols in any field. Plain text only (Dutch
@@ -52,6 +54,7 @@ Rules:
 
 OUTPUT_SCHEMA = """\
 {
+  "title_translation": "natural English translation of the Dutch headline",
   "article_paragraphs": [
     {"dutch": "verbatim Dutch paragraph from the article", "english": "its natural English translation"}
   ],
@@ -201,6 +204,7 @@ def build_lesson(article: Article, cfg: Config) -> dict[str, Any]:
     if not isinstance(lesson, dict):
         raise LessonError("Expected a JSON object lesson, got something else.")
 
+    lesson.setdefault("title_translation", "")
     lesson.setdefault("article_paragraphs", [])
     lesson.setdefault("key_vocabulary", [])
     lesson.setdefault("grammar_points", [])

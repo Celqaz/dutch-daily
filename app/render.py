@@ -145,6 +145,7 @@ def render_document(article: Article, lesson: dict[str, Any], cfg: Config) -> st
 </head>
 <body>
   <h1 class="original">{_esc(article.title)}</h1>
+  <h2 class="original">{_esc(lesson.get("title_translation") or "")}</h2>
   <p class="meta">Dutch Daily · {_esc(stamp)} · beginner level (A1)</p>
 
   {_section_vocabulary(lesson.get("key_vocabulary") or [])}

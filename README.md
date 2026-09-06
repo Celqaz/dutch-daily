@@ -11,7 +11,7 @@ flowchart LR
     B --> C[Claude<br/>writes beginner lesson in English]
     C --> D[Render HTML document]
     D --> E[Gmail SMTP<br/>App Password]
-    E --> F[Kindle<br/>binkindle@kindle.com]
+    E --> F[Kindle<br/>yourname@kindle.com]
     B -.-> G[(state.json<br/>remembers sent articles)]
 ```
 
@@ -146,7 +146,7 @@ kp/
 | `CLAUDE_MODEL` | `claude-sonnet-4-5` (Anthropic) / `deepseek-v4-pro` (DeepSeek) | Model used for lessons |
 | `GMAIL_USER` | – | Gmail "from" address (required to email) |
 | `GMAIL_APP_PASSWORD` | – | Gmail App Password (required to email) |
-| `KINDLE_EMAIL` | `binkindle@kindle.com` | Destination Kindle address |
+| `KINDLE_EMAIL` | `yourname@kindle.com` | Destination Kindle address |
 | `TIMEZONE` | `UTC` | IANA zone for the schedule (use UTC so delivery is always at a fixed UTC hour) |
 | `DELIVERY_TIME` | `05:00` | Daily delivery time (set to an hour inside DeepSeek's off-peak window) |
 | `SEND_EMAIL` | `true` | `false` = build previews only |

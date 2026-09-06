@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -35,6 +35,11 @@ def _env_bool(name: str, default: bool) -> bool:
     return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _split_emails(raw: str) -> list[str]:
+    """Parse a comma-separated list of email addresses."""
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
 @dataclass
 class Config:
     # --- NOS ---
@@ -49,7 +54,8 @@ class Config:
     # --- Gmail -> Kindle ---
     gmail_user: str = ""
     gmail_app_password: str = ""
-    kindle_email: str = "binkindle@kindle.com"
+    # One or more Kindle destinations (KINDLE_EMAIL may be comma-separated).
+    kindle_emails: list[str] = field(default_factory=lambda: ["yourname@kindle.com"])
     # --- Scheduling ---
     timezone: str = "Europe/Amsterdam"
     delivery_time: str = "06:00"
@@ -99,7 +105,9 @@ def get_config() -> Config:
         gmail_app_password="".join(
             os.environ.get("GMAIL_APP_PASSWORD", "").split()
         ),
-        kindle_email=os.environ.get("KINDLE_EMAIL", "binkindle@kindle.com"),
+        kindle_emails=_split_emails(
+            os.environ.get("KINDLE_EMAIL", "yourname@kindle.com")
+        ),
         timezone=os.environ.get("TIMEZONE", "Europe/Amsterdam"),
         delivery_time=os.environ.get("DELIVERY_TIME", "06:00"),
         data_dir=Path(os.environ.get("DATA_DIR", DEFAULT_DATA_DIR)),

@@ -80,7 +80,7 @@ def run_job(cfg: Config, state: State, *, email: bool) -> tuple[Path, bool]:
             msg = kindle.build_message(cfg, html, subject, filename)
             kindle.send_kindle(cfg, msg)
             sent = True
-            log.info("Sent to %s", cfg.kindle_email)
+            log.info("Sent to %s", ", ".join(cfg.kindle_emails))
     else:
         log.info("Email disabled (SEND_EMAIL=false or --no-email).")
 
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> None:
         if args.no_email or not cfg.send_email:
             print("Email was disabled - open the preview to check it, then enable sending.")
         elif sent:
-            print(f"Sent to {cfg.kindle_email}")
+            print(f"Sent to {', '.join(cfg.kindle_emails)}")
         return
 
     # Scheduler mode (normal container operation).

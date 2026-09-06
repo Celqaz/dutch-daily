@@ -18,7 +18,7 @@ def build_message(cfg: Config, html: str, subject: str, filename: str) -> EmailM
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = cfg.gmail_user
-    msg["To"] = cfg.kindle_email
+    msg["To"] = cfg.kindle_emails
     # Kindle only converts *attachments*; the body itself is not used.
     msg.set_content(
         "Your daily Dutch lesson is attached.\n"

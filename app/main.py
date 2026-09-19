@@ -61,6 +61,20 @@ def run_job(cfg: Config, state: State, *, email: bool) -> tuple[Path, bool]:
     out_path.write_text(html, encoding="utf-8")
     log.info("Preview saved: %s", out_path)
 
+    # Record the article BEFORE emailing so a retry cannot re-send the same story.
+    state.mark_seen(article.guid)
+    state.set_last(
+        {
+            "date": _stamp(cfg),
+            "guid": article.guid,
+            "title": article.title,
+            "url": article.url,
+            "email_sent": False,
+            "file": filename,
+        }
+    )
+    state.save()
+
     # 3) Send to the Kindle.
     sent = False
     if email and cfg.send_email:
@@ -84,18 +98,9 @@ def run_job(cfg: Config, state: State, *, email: bool) -> tuple[Path, bool]:
     else:
         log.info("Email disabled (SEND_EMAIL=false or --no-email).")
 
-    state.mark_seen(article.guid)
-    state.set_last(
-        {
-            "date": _stamp(cfg),
-            "guid": article.guid,
-            "title": article.title,
-            "url": article.url,
-            "email_sent": sent,
-            "file": filename,
-        }
-    )
-    state.save()
+    if sent and isinstance(state.data.get("last_delivered"), dict):
+        state.data["last_delivered"]["email_sent"] = True
+        state.save()
     return out_path, sent
 
 

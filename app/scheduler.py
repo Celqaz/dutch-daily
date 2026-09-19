@@ -26,6 +26,10 @@ def seconds_until_next(delivery_time: str, tz_name: str) -> float:
     return (target - now).total_seconds()
 
 
+RUN_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 1800  # retry 30 min later on failure (e.g. transient DNS)
+
+
 def run_daily(job, cfg: Config) -> None:
     """Run ``job()`` once per day at cfg.delivery_time in cfg.timezone, forever."""
     while True:
@@ -37,7 +41,21 @@ def run_daily(job, cfg: Config) -> None:
             wait,
         )
         time.sleep(wait)
-        try:
-            job()
-        except Exception:  # noqa: BLE001 - keep the scheduler alive
-            log.exception("Daily job failed; will retry tomorrow.")
+        for attempt in range(1, RUN_ATTEMPTS + 1):
+            try:
+                job()
+                break
+            except Exception:  # noqa: BLE001 - keep the scheduler alive
+                if attempt < RUN_ATTEMPTS:
+                    log.exception(
+                        "Daily job failed (attempt %d/%d); retrying in %d minutes.",
+                        attempt,
+                        RUN_ATTEMPTS,
+                        RETRY_DELAY_SECONDS // 60,
+                    )
+                    time.sleep(RETRY_DELAY_SECONDS)
+                else:
+                    log.exception(
+                        "Daily job failed after %d attempts; will retry tomorrow.",
+                        RUN_ATTEMPTS,
+                    )

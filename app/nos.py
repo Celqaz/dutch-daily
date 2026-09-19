@@ -4,12 +4,14 @@ from __future__ import annotations
 import gzip
 import json
 import re
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Optional
+from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from .config import Config
@@ -96,15 +98,24 @@ def paragraphs_from_html(html: str) -> list[str]:
     return [re.sub(r"\s+", " ", p).strip() for p in parser.paragraphs if p.strip()]
 
 
-def _get(url: str, timeout: int = 30) -> str:
-    """Fetch a URL as text, transparently handling gzip and redirects."""
-    req = Request(url, headers={"User-Agent": UA})
-    with urlopen(req, timeout=timeout) as resp:  # noqa: S310 (NOS is https/trusted)
-        raw = resp.read()
-        if resp.headers.get("Content-Encoding", "").lower() == "gzip":
-            raw = gzip.decompress(raw)
-        charset = resp.headers.get_content_charset() or "utf-8"
-        return raw.decode(charset, errors="replace")
+def _get(url: str, timeout: int = 30, retries: int = 3) -> str:
+    """Fetch a URL as text, handling gzip/redirects, retrying transient failures."""
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            req = Request(url, headers={"User-Agent": UA})
+            with urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https/trusted)
+                raw = resp.read()
+                if resp.headers.get("Content-Encoding", "").lower() == "gzip":
+                    raw = gzip.decompress(raw)
+                charset = resp.headers.get_content_charset() or "utf-8"
+                return raw.decode(charset, errors="replace")
+        except (URLError, OSError) as exc:
+            # Covers DNS failures (gaierror), timeouts, connection resets.
+            last_error = exc
+            if attempt < retries:
+                time.sleep(2 ** attempt)  # 2s, then 4s
+    raise last_error if last_error else RuntimeError("request failed")
 
 
 @dataclass

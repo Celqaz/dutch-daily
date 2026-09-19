@@ -4,6 +4,12 @@ services:
     image: dutch-daily:latest
     container_name: dutch-daily
     restart: unless-stopped
+    # Explicit DNS servers: on Ubuntu with systemd-resolved the host's
+    # 127.0.0.53 stub can't be forwarded into the container, causing
+    # "Temporary failure in name resolution".
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     env_file:
       - .env
     environment:

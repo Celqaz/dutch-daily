@@ -1,38 +1,50 @@
-"""Send the generated HTML document to a Kindle address via Gmail SMTP."""
+"""Send the generated documents to a Kindle address via Gmail SMTP."""
 from __future__ import annotations
 
 import smtplib
 from email.message import EmailMessage
+from pathlib import Path
 
 from .config import Config
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
 
+_MIME_TYPES = {
+    ".epub": ("application", "epub+zip"),
+    ".html": ("text", "html"),
+    ".pdf": ("application", "pdf"),
+}
+
 
 class SendError(RuntimeError):
     pass
 
 
-def build_message(cfg: Config, html: str, subject: str, filename: str) -> EmailMessage:
+def build_message(cfg: Config, files: list[tuple[str, bytes]], subject: str) -> EmailMessage:
+    """Build the email with one or more attachments.
+
+    ``files`` is a list of ``(filename, content)``; the MIME type is derived from
+    the extension (``.epub`` for KOReader, ``.html`` for Kindle's converter).
+    """
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = cfg.gmail_user
     msg["To"] = cfg.kindle_emails
+    kinds = ", ".join(Path(name).suffix.lstrip(".") for name, _ in files)
     # Kindle only converts *attachments*; the body itself is not used.
     msg.set_content(
-        "Your daily language lesson is attached (one document, English "
-        "breakdowns for every configured language).\n"
-        "Kindle converts the attached .html file into a document with a "
-        "table of contents you can jump around in.\n\n"
-        "Veel succes en がんばって！ (Good luck!)"
+        f"Your daily language practice is attached ({kinds}) - one document with\n"
+        "a table of contents covering every language.\n"
+        "EPUB: read it in KOReader (or pull it from the OPDS catalog).\n"
+        "HTML: opens in any browser and is what Send-to-Kindle converts well.\n\n"
+        "Veel succes en がんばって！ (Good luck!)\n"
     )
-    msg.add_attachment(
-        html.encode("utf-8"),
-        maintype="text",
-        subtype="html",
-        filename=filename,
-    )
+    for name, payload in files:
+        maintype, subtype = _MIME_TYPES.get(
+            Path(name).suffix.lower(), ("application", "octet-stream")
+        )
+        msg.add_attachment(payload, maintype=maintype, subtype=subtype, filename=name)
     return msg
 
 

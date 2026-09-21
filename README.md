@@ -37,8 +37,8 @@ flowchart LR
    exhausted), its section says so and the rest still ships.
 5. The document is **emailed from your Gmail to your Kindle address** — one file,
    one email.
-6. A copy is saved to `output/language-daily-YYYY-MM-DD.html` so you can
-   preview/print it.
+6. A copy of every lesson is saved to both `output/language-daily-YYYY-MM-DD.html`
+   (browser) and `output/language-daily-YYYY-MM-DD.epub` (KOReader/e-readers).
 
 ## Two languages in one document
 
@@ -51,6 +51,38 @@ flowchart LR
   navigation from the headings, so you can jump around on the device.
 - Prefer them as separate documents instead? Run the job twice with
   `--lang nl` and `--lang ja` (each run writes its own file).
+
+## Reading it on KOReader (EPUB + OPDS)
+
+KOReader cannot open what Amazon delivers: "Send to Kindle" converts whatever you
+send — HTML, DOCX *or* EPUB — into Amazon's KFX/AZW3, and neither is in KOReader's
+supported format list (PDF, DjVu, XPS, CBZ, FB2, PDB, TXT, HTML, RTF, CHM, EPUB,
+DOC, MOBI, ZIP). So the daily document is also written as a **real EPUB** and
+published the way KOReader likes it:
+
+```bash
+docker compose up -d --build          # starts the job + the OPDS catalog
+```
+
+On the reader: **Cloud storage → OPDS catalog → add** `http://<pi-ip>:8080/opds`.
+Each day appears as an entry (`language-daily-YYYY-MM-DD`) and downloads the
+EPUB; the reader's own **table of contents** then lists *Dutch → Key Vocabulary /
+Grammar / Word building / Article* and the same for *Japanese*, because the EPUB
+carries a proper nav + NCX built from the document anchors.
+
+Prefer no server? Both files are always written to `output/`, so you can also just
+copy the `.epub` to the device over USB/Calibre, or serve that folder with
+whatever you already run (calibre-web, WebDAV, FTP, Dropbox).
+
+Handy flags:
+
+```bash
+python -m app.opds --dir output --port 8080          # run the catalog alone
+python -m app.opds --user learner --password secret  # add HTTP Basic auth
+ATTACH_FORMAT=both python -m app.main --once         # email EPUB + HTML
+```
+
+Set `SEND_EMAIL=false` if you no longer want the Kindle-mail route at all.
 
 ## Japanese source
 
@@ -208,7 +240,8 @@ Adding a language = one profile in `app/languages.py` (+ a prompt in
 | `KINDLE_EMAIL` | `yourname@kindle.com` | Destination Kindle address (comma-separate to send to several) |
 | `TIMEZONE` | `UTC` | IANA zone for the schedule (use UTC so delivery is always at a fixed UTC hour) |
 | `DELIVERY_TIME` | `05:00` | Daily delivery time (set to an hour inside DeepSeek's off-peak window) |
-| `SEND_EMAIL` | `true` | `false` = build previews only |
+| `SEND_EMAIL` | `true` | `false` = build the files only |
+| `ATTACH_FORMAT` | `epub` | What to email: `epub`, `html` or `both` |
 | `LANGUAGES` | `nl` | Which languages go into the document, in order (e.g. `nl,ja`) |
 | `NOS_FEED_URL` | `https://feeds.nos.nl/nosnieuwsalgemeen` | Dutch feed (per-section: `nosnieuwssport`, …) |
 | `JA_FEED_URL` | `https://nhkeasier.com/feed/` | Japanese feed — nhkeasier.com (see the Japanese source section) |

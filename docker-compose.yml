@@ -17,5 +17,24 @@ services:
     volumes:
       # state.json lives here so it survives container rebuilds
       - ./data:/app/data
-      # saved preview .html files (also handy for checking before emailing)
+      # saved preview .html/.epub files (also handy for checking before emailing)
       - ./output:/app/output
+
+  # OPDS catalog for KOReader: on the reader open Cloud storage -> OPDS catalog
+  # and add http://<pi>:8080/opds to download each day's EPUB over Wi-Fi.
+  opds:
+    build: .
+    image: dutch-daily:latest
+    container_name: dutch-daily-opds
+    restart: unless-stopped
+    command: ["python", "-m", "app.opds", "--dir", "/app/output"]
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      # read-only: this service only serves what the daily job produced
+      - ./output:/app/output:ro

@@ -10,6 +10,7 @@ venv/
 # Runtime data & previews
 data/state.json
 output/*.html
+output/*.epub
 output/*.pdf
 
 # OS / editor cruft

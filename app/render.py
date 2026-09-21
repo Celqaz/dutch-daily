@@ -102,7 +102,7 @@ def _romaji_span(romaji: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _toc_entries(section: Section) -> list[tuple[str, str]]:
+def toc_entries(section: Section) -> list[tuple[str, str]]:
     """(label, anchor) for the sub-sections that actually have content."""
     lesson = section.lesson or {}
     entries: list[tuple[str, str]] = []
@@ -131,7 +131,7 @@ def _toc(sections: list[Section]) -> str:
         parts.append(f'<li><a href="#{code}"><b>{_esc(section.heading)}</b></a>')
         if not section.ok:
             parts.append(' <span class="note">- not available today</span>')
-        entries = _toc_entries(section)
+        entries = toc_entries(section)
         if entries:
             parts.append("<ul>")
             for label, anchor in entries:
@@ -336,23 +336,38 @@ def document_title(cfg: Config, sections: list[Section]) -> str:
     return f"{names or 'Language'} Daily {stamp}"
 
 
-def render_document(sections: list[Section], cfg: Config) -> str:
-    """Render every language section into one HTML document with a linked TOC."""
-    stamp = datetime.now(ZoneInfo(cfg.timezone)).strftime("%A %d %B %Y")
+def document_date(cfg: Config) -> str:
+    """Human-readable date used under the title."""
+    return datetime.now(ZoneInfo(cfg.timezone)).strftime("%A %d %B %Y")
+
+
+def languages_of(sections: list[Section]) -> list[str]:
+    """Language codes present in the document, in order, de-duplicated."""
+    codes: list[str] = []
+    for section in sections:
+        if section.profile.code not in codes:
+            codes.append(section.profile.code)
+    return codes
+
+
+def render_styles() -> str:
+    """The stylesheet shared by the HTML preview and the EPUB."""
+    return _CSS
+
+
+def render_body(sections: list[Section], cfg: Config) -> str:
+    """Inner document body: title, TOC, one block per language, footer.
+
+    This is what both the standalone HTML file and the EPUB content document
+    render, so the two stay identical (anchors included).
+    """
     title = document_title(cfg, sections)
     blocks = "\n<hr class=\"divider\"/>\n".join(
         _render_section(section) for section in sections
     )
-    body = f"""\
-<html>
-<head>
-<meta charset="utf-8">
-<title>{_esc(title)}</title>
-<style>{_CSS}</style>
-</head>
-<body>
+    return f"""\
   <div class="doc-title">{_esc(title)}</div>
-  <p class="meta">Daily reading practice &middot; {_esc(stamp)}</p>
+  <p class="meta">Daily reading practice &middot; {_esc(document_date(cfg))}</p>
 
   {_toc(sections)}
 
@@ -362,8 +377,21 @@ def render_document(sections: list[Section], cfg: Config) -> str:
     <p>Generated automatically for your daily language practice. Vocab and
     grammar breakdown by AI - check important details before relying on them.</p>
     <p><a href="#toc">Back to contents</a></p>
-  </div>
+  </div>"""
+
+
+def render_document(sections: list[Section], cfg: Config) -> str:
+    """Full standalone HTML document (browser preview + email attachment)."""
+    title = document_title(cfg, sections)
+    return f"""\
+<html>
+<head>
+<meta charset="utf-8">
+<title>{_esc(title)}</title>
+<style>{_CSS}</style>
+</head>
+<body>
+{render_body(sections, cfg)}
 </body>
 </html>
 """
-    return body

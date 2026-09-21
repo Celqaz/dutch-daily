@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import kindle, lesson, render, sources
+from . import epub, kindle, lesson, render, sources
 from .config import Config, get_config
 from .languages import LanguageProfile, UnknownLanguage, get_profile, parse_languages
 from .lesson import LessonError
@@ -84,13 +84,18 @@ def run_job(
     if not any(section.ok for section in sections):
         raise RuntimeError("No lesson could be generated for any configured language.")
 
-    # 1) Render every language into ONE document and always keep a local preview.
+    # 1) Render every language into ONE document - as HTML (browser preview,
+    #    Kindle's converter) and as EPUB (KOReader, pulled via OPDS) - and always
+    #    keep a local copy of both.
     html = render.render_document(sections, cfg)
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     filename = f"language-daily-{_stamp(cfg)}.html"
+    epub_name = f"language-daily-{_stamp(cfg)}.epub"
     out_path = cfg.output_dir / filename
     out_path.write_text(html, encoding="utf-8")
-    log.info("Preview saved: %s", out_path)
+    epub_path = cfg.output_dir / epub_name
+    epub.write_epub(epub_path, sections, cfg)
+    log.info("Saved preview: %s (%d bytes) and %s (%d bytes)", out_path, out_path.stat().st_size, epub_path, epub_path.stat().st_size)
 
     # Record the articles BEFORE emailing so a retry cannot re-send the same stories.
     delivered: dict[str, dict] = {}
@@ -114,6 +119,7 @@ def run_job(
             "url": first.url if first else "",
             "email_sent": False,
             "file": filename,
+            "epub": epub_name,
             "languages": delivered,
         }
     )
@@ -140,10 +146,17 @@ def run_job(
                 if section.ok and section.article is not None
             )
             subject = f"{render.document_title(cfg, sections)}: {titles}"[:120]
-            msg = kindle.build_message(cfg, html, subject, filename)
+            payloads: list[tuple[str, bytes]] = []
+            for name in cfg.attachments_for(filename, epub_name):
+                payloads.append((name, (cfg.output_dir / name).read_bytes()))
+            msg = kindle.build_message(cfg, payloads, subject)
             kindle.send_kindle(cfg, msg)
             sent = True
-            log.info("Sent to %s", ", ".join(cfg.kindle_emails))
+            log.info(
+                "Sent %s to %s",
+                ", ".join(name for name, _ in payloads),
+                ", ".join(cfg.kindle_emails),
+            )
     else:
         log.info("Email disabled (SEND_EMAIL=false or --no-email).")
 

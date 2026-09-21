@@ -73,6 +73,9 @@ class Config:
     data_dir: Path = DEFAULT_DATA_DIR
     output_dir: Path = DEFAULT_OUTPUT_DIR
     send_email: bool = True
+    # Which document to email: "epub" (KOReader/Kobo), "html" (browser preview,
+    # what Kindle's converter prefers) or "both".
+    attach_format: str = "epub"
     # When a feed has no unseen item left, resend the newest one instead of
     # skipping that language for the day.
     allow_repeats: bool = False
@@ -101,6 +104,14 @@ class Config:
         if code == "ja":
             return self.max_article_chars_ja, self.max_vocab_ja
         return self.max_article_chars, self.max_vocab
+
+    def attachments_for(self, html_name: str, epub_name: str) -> list[str]:
+        """Filenames to attach to the email, honouring ATTACH_FORMAT."""
+        if self.attach_format == "html":
+            return [html_name]
+        if self.attach_format == "both":
+            return [epub_name, html_name]
+        return [epub_name]
 
     def feed_url_for(self, code: str, default: str = "") -> str:
         return self.feed_urls.get(code) or default
@@ -145,6 +156,7 @@ def get_config() -> Config:
         data_dir=Path(os.environ.get("DATA_DIR", DEFAULT_DATA_DIR)),
         output_dir=Path(os.environ.get("OUTPUT_DIR", DEFAULT_OUTPUT_DIR)),
         send_email=_env_bool("SEND_EMAIL", True),
+        attach_format=os.environ.get("ATTACH_FORMAT", "epub").strip().lower(),
         allow_repeats=_env_bool("ALLOW_REPEATS", False),
         max_article_chars=int(os.environ.get("MAX_ARTICLE_CHARS", "1700")),
         max_vocab=int(os.environ.get("MAX_VOCAB", "12")),

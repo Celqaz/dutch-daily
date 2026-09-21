@@ -35,7 +35,7 @@ def run_daily(job, cfg: Config) -> None:
     while True:
         wait = seconds_until_next(cfg.delivery_time, cfg.timezone)
         log.info(
-            "Next Dutch lesson scheduled for %s %s (in %.0f s).",
+            "Next language lesson scheduled for %s %s (in %.0f s).",
             cfg.delivery_time,
             cfg.timezone,
             wait,

@@ -1,36 +1,78 @@
-# Dutch Daily 🇳🇱
+# Language Daily 🇳🇱 🇯🇵
 
-A tiny service for your **Raspberry Pi** that emails you one real **NOS.nl** news
-article every morning, rewritten by AI into an **English study breakdown** for a
-**total beginner (A1)** — vocabulary, useful phrases, grammar notes and a quick
-self-test — delivered straight to your **Kindle**.
+A tiny service for your **Raspberry Pi** that emails you **one Kindle document**
+containing one lesson per language — by default a real **NOS.nl** Dutch news
+article and a real **Japanese** article. Each one is rewritten by AI into an
+**English study breakdown** for a **total beginner (A1)**: key vocabulary, grammar
+points (with kana + romaji readings for Japanese), word building, and the article
+translated **paragraph by paragraph**.
+
+The document opens with a **table of contents**, so on the Kindle you can jump
+straight from Contents to the Dutch or the Japanese half — and back.
 
 ```mermaid
 flowchart LR
-    A[NOS RSS feed<br/>feeds.nos.nl/nosnieuwsalgemeen] -->|1. newest unseen article| B[Scraper<br/>full text from JSON-LD]
-    B --> C[Claude<br/>writes beginner lesson in English]
-    C --> D[Render HTML document]
-    D --> E[Gmail SMTP<br/>App Password]
-    E --> F[Kindle<br/>yourname@kindle.com]
-    B -.-> G[(state.json<br/>remembers sent articles)]
+    A[NOS.nl RSS] -->|newest unseen| B[Dutch lesson]
+    H[Japanese RSS<br/>nhkeasier.com] -->|newest unseen| I[Japanese lesson]
+    B --> L[One HTML document<br/>with a linked TOC]
+    I --> L
+    L --> E[Gmail SMTP<br/>App Password]
+    E --> F[Kindle]
+    B -.-> G[(state.json<br/>per-language sent ids)]
+    I -.-> G
 ```
 
 ## How it works
 
 1. **05:00 UTC** the container wakes up (picked to sit in DeepSeek's off-peak
    window — verify the window on https://platform.deepseek.com).
-2. It pulls the NOS general-news RSS feed, then picks the **newest article it
-   hasn't already sent** (`data/state.json` remembers, so you never get repeats).
-3. It grabs the full article text and sends it to the **LLM** (Anthropic Claude
-   or DeepSeek), which produces a
-   structured, beginner-friendly lesson **in English**: headline translation,
-   summary, ~10 key words with example sentences, useful phrases with
-   word-for-word translations, grammar points pulled from the real text, common
-   traps, and a 3-question self-test with answers.
-4. The lesson is rendered into a clean HTML document (reflowable on Kindle) and
-   **emailed from your Gmail to your Kindle address**.
-5. A copy of every lesson is also saved to `output/dutch-daily-YYYY-MM-DD.html`
-   so you can preview/print it.
+2. For **every language in `LANGUAGES`** it pulls that language's RSS feed and
+   picks the **newest article it hasn't already sent** (`data/state.json`
+   remembers per language, so you never get repeats).
+3. It grabs the article text and sends it to the **LLM** (Anthropic Claude or
+   DeepSeek), which produces a structured, beginner-friendly lesson **in English**.
+4. All lessons are rendered into **one HTML document** with a table of contents: a
+   section per language, each with vocabulary, grammar, word building and the
+   article paragraph by paragraph. If one language fails (or its feed is
+   exhausted), its section says so and the rest still ships.
+5. The document is **emailed from your Gmail to your Kindle address** — one file,
+   one email.
+6. A copy is saved to `output/language-daily-YYYY-MM-DD.html` so you can
+   preview/print it.
+
+## Two languages in one document
+
+- `LANGUAGES=nl,ja` decides which languages are included and in what order
+  (`nl` = Dutch, `ja` = Japanese). One language is perfectly fine too.
+- The document title/ filename is `language-daily-YYYY-MM-DD.html`.
+- **TOC on the Kindle:** the top of the document lists every language and its
+  sections as internal links (`Contents -> Japanese -> Key Grammar Points -> and
+  back`). Send-to-Kindle keeps internal links and also builds its "Go to"
+  navigation from the headings, so you can jump around on the device.
+- Prefer them as separate documents instead? Run the job twice with
+  `--lang nl` and `--lang ja` (each run writes its own file).
+
+## Japanese source
+
+The Japanese feed is **`https://nhkeasier.com/feed/`** (an NHK News Web Easy
+mirror, ~5 new stories per day). Its RSS *description* already contains the
+complete easy-Japanese article with real `<p>` paragraph breaks, **furigana for
+every kanji** and a slow-reading **mp3**, so nothing has to be scraped:
+
+- the furigana is handed to the LLM as the authoritative kana reading (`[READING]`
+  lines) and overrides the model's guess — which matters for irregular readings
+  (20日 = はつか, not にじゅうにち);
+- the mp3 is printed in the document as *Listen (slow reading)*; Kindle mail
+  cannot carry audio, but the link works fine on a phone.
+
+If the feed ever stops shipping the whole article, the job falls back to fetching
+the story page and extracting its body, so it keeps working; and when the feed has
+no unseen story left the Japanese section simply says *"no new article today"*
+(`ALLOW_REPEATS=true` resends the newest story instead).
+
+> nhkeasier.com is a third-party mirror of NHK's learner content — fine for
+> personal study, but don't redistribute it.
+
 
 ## Option A: use DeepSeek instead of Claude
 
@@ -91,20 +133,30 @@ day at **05:00 UTC**.
 
 ## Test it immediately (before waiting for 05:00 UTC)
 
-Send one lesson to your Kindle right now:
+Check that both feeds and scrapers work (no LLM call, no email):
+
+```bash
+python -m app.main --check
+```
+
+Send one document to your Kindle right now:
 
 ```bash
 docker compose run --rm dutch-daily python -m app.main --once
 ```
 
-…or just build the lesson and **save the preview without emailing**:
+…or just build the document and **save the preview without emailing**:
 
 ```bash
 docker compose run --rm dutch-daily python -m app.main --once --no-email
 ```
 
-Check `output/dutch-daily-*.html` — open it in a browser to see exactly what your
-Kindle will receive.
+Check `output/language-daily-*.html` — open it in a browser to see exactly what
+your Kindle will receive. To build only one language (or test a one-off language):
+
+```bash
+python -m app.main --once --no-email --lang ja
+```
 
 ## Running without Docker (optional)
 
@@ -121,14 +173,17 @@ python -m app.main &               # scheduler mode
 ```
 kp/
 ├── app/
-│   ├── main.py        # CLI: --once / scheduler mode
-│   ├── config.py      # reads .env
-│   ├── nos.py         # NOS RSS feed + full-text scraper
-│   ├── lesson.py      # Claude prompt + lesson parsing
-│   ├── render.py      # lesson -> Kindle HTML
+│   ├── main.py        # CLI: --once / --check / scheduler mode
+│   ├── config.py      # reads .env (languages, feeds, limits)
+│   ├── languages.py   # per-language profile: feed, headings, limits
+│   ├── prompts.py     # the Dutch and Japanese LLM prompts + JSON schemas
+│   ├── sources.py     # RSS + article text per language (NOS, Japanese)
+│   ├── web.py         # shared HTTP / HTML / RSS / JSON-LD helpers
+│   ├── lesson.py      # LLM call + normalising the lesson JSON
+│   ├── render.py      # lessons -> one Kindle HTML document with a TOC
 │   ├── kindle.py      # Gmail SMTP sender
 │   ├── scheduler.py   # daily loop (05:00 UTC)
-│   └── state.py       # remembers sent article ids
+│   └── state.py       # remembers sent article ids per language
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
@@ -136,6 +191,10 @@ kp/
 ├── data/              # state.json (kept across rebuilds via volume)
 └── output/            # daily .html previews
 ```
+
+Adding a language = one profile in `app/languages.py` (+ a prompt in
+`app/prompts.py`) and, if its pages need special handling, one builder in
+`app/sources.py`.
 
 ## Configuration reference
 
@@ -150,8 +209,14 @@ kp/
 | `TIMEZONE` | `UTC` | IANA zone for the schedule (use UTC so delivery is always at a fixed UTC hour) |
 | `DELIVERY_TIME` | `05:00` | Daily delivery time (set to an hour inside DeepSeek's off-peak window) |
 | `SEND_EMAIL` | `true` | `false` = build previews only |
-| `MAX_ARTICLE_CHARS` | `1700` | Article length fed to Claude |
-| `MAX_VOCAB` | `12` | Max vocab entries in each lesson |
+| `LANGUAGES` | `nl` | Which languages go into the document, in order (e.g. `nl,ja`) |
+| `NOS_FEED_URL` | `https://feeds.nos.nl/nosnieuwsalgemeen` | Dutch feed (per-section: `nosnieuwssport`, …) |
+| `JA_FEED_URL` | `https://nhkeasier.com/feed/` | Japanese feed — nhkeasier.com (see the Japanese source section) |
+| `ALLOW_REPEATS` | `false` | `true` = resend the newest article when a feed has no unseen item left |
+| `MAX_ARTICLE_CHARS` | `1700` | Dutch article length fed to the LLM |
+| `MAX_VOCAB` | `12` | Max Dutch vocab entries |
+| `MAX_ARTICLE_CHARS_JA` | `900` | Japanese article length (characters carry more meaning) |
+| `MAX_VOCAB_JA` | `10` | Max Japanese vocab entries |
 
 ## Troubleshooting
 
@@ -159,12 +224,19 @@ kp/
   *Approved Personal Document E-mail List* (this is the #1 cause), and confirm
   `SEND_EMAIL` isn't `false`.
 - **`Gmail rejected the login`** → use an App Password, not your normal password.
-- **`No items …`** → NOS feed unreachable; check the Pi's network/date.
-- **Duplicates** → delete `data/state.json` to reset the "already sent" memory.
+- **`No items …`** → a feed is unreachable; run `python -m app.main --check` to
+  see which one, then check the Pi's network/date.
+- **The Japanese section is very short** → the feed is only shipping a teaser and
+  a partial page body was used; check `data/state.json` and the logs from
+  `python -m app.main --check`.
+- **A section says "no new article today"** → that feed ran out of unseen
+  articles. Add another language/feed, or set `ALLOW_REPEATS=true`.
+- **Duplicates** → delete `data/state.json` to reset the "already sent" memory
+  (it is stored per language now).
 - **AI caveat** → grammar notes are AI-generated; spot-check important details.
 
 ## Ideas to extend later
 
-- Switch feed to sport/tech: `NOS_FEED_URL=https://feeds.nos.nl/nosnieuwssport`
+- Switch the Dutch feed to sport/tech: `NOS_FEED_URL=https://feeds.nos.nl/nosnieuwssport`
 - Add audio by including a text-to-speech clip (e.g. NOS op 3 / Google TTS) in the email.
 - Send an `.epub` instead of `.html` for nicer styling.

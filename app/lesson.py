@@ -1,4 +1,9 @@
-"""Generate a beginner Dutch lesson from an article using Anthropic Claude."""
+"""Generate a beginner lesson from an article, for any supported language.
+
+The prompt and the JSON field names come from a :class:`LanguageProfile`; the
+model's answer is normalised into one canonical shape so the renderer never has
+to know which language it is looking at.
+"""
 from __future__ import annotations
 
 import json
@@ -6,76 +11,8 @@ import re
 from typing import Any
 
 from .config import Config
-from .nos import Article
-
-SYSTEM_PROMPT = """\
-You are an expert tutor of Dutch as a foreign language. Your student is a TOTAL
-BEGINNER (CEFR A1) whose native language is English. Each day you receive one real,
-short Dutch news article from NOS.nl. Turn it into a structured, friendly,
-self-study lesson in English with this layout, in order (learn words and
-grammar first, read the article last):
-1) Key Vocabulary   2) Grammar Points   3) Word building   4) Article paragraphs.
-Top of the JSON: title_translation = the natural English translation of the
-Dutch headline (shown under the headline at the very top of the lesson).
-
-Rules:
-- NEVER use emoji or decorative symbols in any field. Plain text only (Dutch
-  accented letters are fine). No tables or columns - just text.
-- Beginner tone: simple, warm, concrete English. If you use a grammar term,
-  explain it in one plain-English phrase.
-- Ground EVERYTHING in the article: quote real Dutch from the text in examples;
-  never invent example sentences or facts about the story.
-- ARTICLE PARAGRAPHS (reading practice, goes LAST in the document): the article
-  text below is split into paragraphs, each marked [PARAGRAPH n]. Output EVERY
-  paragraph in order: article_paragraphs[].dutch must be the VERBATIM Dutch
-  paragraph, and article_paragraphs[].english its natural English translation.
-- KEY VOCABULARY = the 8-12 most useful words/phrases from the article. In each
-  NOTES value: give the article (de/het/een) for nouns and the infinitive for
-  verbs, plus one short hint (a cognate, a word-part, or 'very common').
-- GRAMMAR POINTS = exactly 3 to 5 points chosen from grammar that is BOTH visible
-  in this article AND appropriate for an A1 learner (e.g. de/het, present tense,
-  word order after a time word, separable verbs, plurals, common prepositions,
-  inversion after an opener like 'zo' or a time phrase, negation with niet/geen,
-  adjectives, the 'om ... te' purpose structure, diminutives). For EACH point:
-    * title = a short name of the idea
-    * example_nl = ONE real sentence quoted from the article
-    * example_en = its English translation
-    * explanation_en = a simple beginner explanation of how the pattern works
-    * word_order = optional 1-6 slots showing how the example sentence is built
-      (e.g. [{"slot":"Position 1","dutch":"Zo"},{"slot":"Position 2","dutch":"tikte"}])
-    * more_examples = 0-3 short related examples (nl + en)
-    * tip_en = a one-line memory hook (no emoji)
-- WORD BUILDING = 2-5 longer words from the article split into parts, each with a
-  gloss of the whole (e.g. uitleggen = uit + leggen, "out-lay").
-- Keep the story faithful to the article. Do not add facts.
-- Output ONLY a single valid JSON object matching the schema below. No markdown
-  fences, no commentary, no trailing text.
-"""
-
-OUTPUT_SCHEMA = """\
-{
-  "title_translation": "natural English translation of the Dutch headline",
-  "article_paragraphs": [
-    {"dutch": "verbatim Dutch paragraph from the article", "english": "its natural English translation"}
-  ],
-  "key_vocabulary": [
-    {"dutch": "word or phrase as it appears", "english": "English meaning", "notes": "de/het/een + noun / infinitive for verbs / one short hint"}
-  ],
-  "grammar_points": [
-    {
-      "title": "short name of the grammar idea",
-      "example_nl": "one real Dutch sentence quoted from the article",
-      "example_en": "English translation of that sentence",
-      "explanation_en": "simple beginner (A1) explanation of the pattern",
-      "word_order": [{"slot": "Position 1", "dutch": "..."}, {"slot": "Position 2", "dutch": "..."}],
-      "more_examples": [{"nl": "short Dutch example", "en": "English"}],
-      "tip_en": "one-line memory hook"
-    }
-  ],
-  "word_building": [
-    {"word": "long word", "parts": "part1 + part2", "english": "meaning of the whole word"}
-  ]
-}"""
+from .languages import LanguageProfile
+from .web import Article
 
 
 class LessonError(RuntimeError):
@@ -90,35 +27,38 @@ def _first_json_block(text: str) -> str:
     return text[start : end + 1]
 
 
-def _numbered_paragraphs(paragraphs: list[str], max_chars: int) -> str:
-    """Turn real article paragraphs into [PARAGRAPH n] blocks, bounded to max_chars."""
+def _numbered_paragraphs(
+    paragraphs: list[str], max_chars: int, readings: list[str] | None = None
+) -> str:
+    """Turn real article paragraphs into [PARAGRAPH n] blocks, bounded to max_chars.
+
+    When the source publishes furigana, the kana reading is added as a
+    ``[READING]`` line so the model reuses it instead of guessing kanji readings.
+    """
     result: list[str] = []
     used = 0
     for i, raw in enumerate(paragraphs, 1):
         para = re.sub(r"\s+", " ", raw).strip()
         if not para:
             continue
+        truncated = False
         if used + len(para) > max_chars:
             remaining = max_chars - used
             if remaining < 60:
                 break
             para = para[:remaining].rsplit(" ", 1)[0].rstrip() + " …"
+            truncated = True
         used += len(para)
-        result.append(f"[PARAGRAPH {i}]\n{para}")
+        block = f"[PARAGRAPH {i}]\n{para}"
+        reading = ""
+        if readings and i - 1 < len(readings):
+            reading = readings[i - 1]
+        if reading and not truncated and reading != para:
+            block += f"\n[READING] {reading}"
+        result.append(block)
         if used >= max_chars:
             break
     return "\n\n".join(result)
-
-
-def _trim_article(article: Article, max_chars: int) -> str:
-    text = article.text.strip()
-    if len(text) <= max_chars:
-        return text
-    cut = text[:max_chars]
-    # Try not to slice mid-word.
-    if " " in cut:
-        cut = cut[: cut.rfind(" ")]
-    return cut + " …"
 
 
 def _extract_text(content) -> str:
@@ -139,8 +79,10 @@ def _extract_text(content) -> str:
     return "\n".join(parts)
 
 
-def build_lesson(article: Article, cfg: Config) -> dict[str, Any]:
-    """Ask Claude for a structured lesson about this article and return it as a dict."""
+def build_lesson(
+    article: Article, cfg: Config, profile: LanguageProfile
+) -> dict[str, Any]:
+    """Ask the LLM for a structured lesson about this article, normalised for rendering."""
     if not cfg.anthropic_api_key:
         raise LessonError(
             "ANTHROPIC_API_KEY is not set — add it to .env (see README)."
@@ -157,18 +99,32 @@ def build_lesson(article: Article, cfg: Config) -> dict[str, Any]:
         client_kwargs["base_url"] = cfg.anthropic_base_url
     client = anthropic.Anthropic(**client_kwargs)
 
+    max_chars, _ = cfg.limits_for(profile.code)
     paragraphs = article.paragraphs or [article.text]
-    article_block = _numbered_paragraphs(paragraphs, cfg.max_article_chars)
+    readings = (
+        article.paragraph_readings
+        if len(article.paragraph_readings) == len(paragraphs)
+        else []
+    )
+    article_block = _numbered_paragraphs(paragraphs, max_chars, readings)
+    reading_note = (
+        "[READING] lines are the official kana readings from the source - use "
+        "them verbatim for that paragraph.\n"
+        if any(readings)
+        else ""
+    )
+    language = profile.name.upper()
     user_content = (
-        "Please write the lesson for this NOS article.\n\n"
+        f"Please write the lesson for this {profile.source_name} article.\n\n"
         f"PUBLISHED: {article.published or 'unknown'}\n"
-        f"DUTCH HEADLINE: {article.title}\n"
+        f"{language} HEADLINE: {article.title}\n"
         f"SOURCE URL: {article.url}\n\n"
-        "DUTCH ARTICLE TEXT - paragraphs are marked [PARAGRAPH n]; copy each "
-        "paragraph VERBATIM into article_paragraphs[].dutch, in order:\n"
+        f"{language} ARTICLE TEXT - paragraphs are marked [PARAGRAPH n]; copy each "
+        f"paragraph VERBATIM into article_paragraphs[].{profile.para_text}, in order:\n"
         f"{article_block}\n\n"
+        f"{reading_note}"
         "Return exactly this JSON structure:\n"
-        f"{OUTPUT_SCHEMA}"
+        f"{profile.output_schema}"
     )
 
     try:
@@ -183,18 +139,20 @@ def build_lesson(article: Article, cfg: Config) -> dict[str, Any]:
         request_kwargs: dict = {
             "model": cfg.claude_model,
             "max_tokens": 8192,
-            "system": SYSTEM_PROMPT,
+            "system": profile.system_prompt,
             "messages": [{"role": "user", "content": user_content}],
         }
         if "deepseek" in cfg.anthropic_base_url.lower():
             request_kwargs["thinking"] = {"type": "disabled"}
         response = client.messages.create(**request_kwargs)
     except Exception as exc:  # noqa: BLE001
-        raise LessonError(f"Anthropic API call failed: {exc}") from exc
+        raise LessonError(
+            f"LLM API call failed for {profile.name} ({cfg.claude_model}): {exc}"
+        ) from exc
 
     raw_text = _extract_text(response.content).strip()
     if not raw_text:
-        raise LessonError("Anthropic returned no text content.")
+        raise LessonError(f"The model returned no text content for {profile.name}.")
 
     try:
         lesson = json.loads(_first_json_block(raw_text))
@@ -204,18 +162,160 @@ def build_lesson(article: Article, cfg: Config) -> dict[str, Any]:
     if not isinstance(lesson, dict):
         raise LessonError("Expected a JSON object lesson, got something else.")
 
-    lesson.setdefault("title_translation", "")
-    lesson.setdefault("article_paragraphs", [])
-    lesson.setdefault("key_vocabulary", [])
-    lesson.setdefault("grammar_points", [])
-    lesson.setdefault("word_building", [])
+    normalized = _normalize(lesson, profile, cfg)
+    _apply_source_readings(normalized, article)
+    return normalized
 
-    # Hard caps to keep the Kindle document digestible.
-    if len(lesson["key_vocabulary"]) > cfg.max_vocab:
-        lesson["key_vocabulary"] = lesson["key_vocabulary"][: cfg.max_vocab]
-    if len(lesson["grammar_points"]) > 5:
-        lesson["grammar_points"] = lesson["grammar_points"][:5]
-    if len(lesson["word_building"]) > 5:
-        lesson["word_building"] = lesson["word_building"][:5]
 
-    return lesson
+def _apply_source_readings(lesson: dict[str, Any], article: Article) -> None:
+    """Prefer the source's own furigana over the model's reading, when aligned."""
+    readings = article.paragraph_readings
+    pairs = lesson.get("article_paragraphs") or []
+    if not any(readings) or len(readings) != len(pairs):
+        return
+    for pair, reading in zip(pairs, readings):
+        if reading:
+            pair["reading"] = reading
+
+
+# --------------------------------------------------------------------------- #
+# Normalisation: model JSON -> one canonical shape for the renderer           #
+# --------------------------------------------------------------------------- #
+
+
+def _text(obj: Any, *keys: str) -> str:
+    """First non-empty string among ``keys`` (missing keys are fine)."""
+    if not isinstance(obj, dict):
+        return ""
+    for key in keys:
+        if not key:
+            continue
+        value = obj.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, (int, float)):
+            return str(value)
+    return ""
+
+
+def _as_list(value: Any) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _normalize_paragraphs(lesson: dict, profile: LanguageProfile) -> list[dict]:
+    pairs: list[dict] = []
+    for raw in _as_list(lesson.get("article_paragraphs")):
+        if not isinstance(raw, dict):
+            continue
+        text = _text(raw, profile.para_text, "text", "source")
+        if not text:
+            continue
+        pairs.append(
+            {
+                "text": text,
+                "reading": _text(raw, profile.para_reading),
+                "english": _text(raw, "english", "en"),
+            }
+        )
+    return pairs
+
+
+def _normalize_vocabulary(lesson: dict, profile: LanguageProfile) -> list[dict]:
+    items: list[dict] = []
+    for raw in _as_list(lesson.get("key_vocabulary")):
+        if not isinstance(raw, dict):
+            continue
+        term = _text(raw, profile.vocab_term, "term", "source")
+        if not term:
+            continue
+        items.append(
+            {
+                "term": term,
+                "reading": _text(raw, "reading"),
+                "romaji": _text(raw, "romaji"),
+                "english": _text(raw, "english", "en"),
+                "notes": _text(raw, "notes"),
+            }
+        )
+    return items
+
+
+def _normalize_grammar(lesson: dict, profile: LanguageProfile) -> list[dict]:
+    points: list[dict] = []
+    for raw in _as_list(lesson.get("grammar_points")):
+        if not isinstance(raw, dict):
+            continue
+        word_order = [
+            {"slot": _text(step, "slot", "position"), "text": _text(step, profile.word_order_text, "text", "source")}
+            for step in _as_list(raw.get("word_order"))
+            if isinstance(step, dict)
+        ]
+        more_examples = [
+            {
+                "text": _text(ex, profile.more_example, "text", "source"),
+                "reading": _text(ex, profile.more_example_reading, "reading"),
+                "romaji": _text(ex, "romaji"),
+                "en": _text(ex, "en", "english"),
+            }
+            for ex in _as_list(raw.get("more_examples"))
+            if isinstance(ex, dict)
+        ]
+        points.append(
+            {
+                "title": _text(raw, "title"),
+                "example_text": _text(raw, profile.grammar_example, "example_text"),
+                "example_reading": _text(raw, profile.grammar_example_reading, "example_reading"),
+                "example_romaji": _text(raw, "example_romaji"),
+                "example_en": _text(raw, "example_en", "english"),
+                "explanation_en": _text(raw, "explanation_en", "explanation"),
+                "word_order": [s for s in word_order if s["text"]],
+                "more_examples": [e for e in more_examples if e["text"]],
+                "tip_en": _text(raw, "tip_en", "tip"),
+            }
+        )
+    return points
+
+
+def _normalize_word_building(lesson: dict, profile: LanguageProfile) -> list[dict]:
+    words: list[dict] = []
+    for raw in _as_list(lesson.get("word_building")):
+        if not isinstance(raw, dict):
+            continue
+        word = _text(raw, "word")
+        if not word:
+            continue
+        words.append(
+            {
+                "word": word,
+                "reading": _text(raw, profile.word_building_reading, "reading"),
+                "romaji": _text(raw, "romaji"),
+                "parts": _text(raw, "parts"),
+                "english": _text(raw, "english", "en"),
+            }
+        )
+    return words
+
+
+def _normalize(
+    lesson: dict[str, Any], profile: LanguageProfile, cfg: Config
+) -> dict[str, Any]:
+    """Canonical lesson shape shared by every language."""
+    _, max_vocab = cfg.limits_for(profile.code)
+    return {
+        "title_translation": _text(lesson, "title_translation"),
+        "article_paragraphs": _normalize_paragraphs(lesson, profile),
+        "key_vocabulary": _normalize_vocabulary(lesson, profile)[:max_vocab],
+        "grammar_points": _normalize_grammar(lesson, profile)[: profile.max_grammar_points],
+        "word_building": _normalize_word_building(lesson, profile)[
+            : profile.max_word_building
+        ],
+    }
+
+
+def lesson_summary(lesson: dict[str, Any]) -> str:
+    """One-line description used in logs."""
+    return (
+        f"{len(lesson.get('key_vocabulary') or [])} vocab, "
+        f"{len(lesson.get('grammar_points') or [])} grammar, "
+        f"{len(lesson.get('article_paragraphs') or [])} paragraphs"
+    )

@@ -21,9 +21,11 @@ def build_message(cfg: Config, html: str, subject: str, filename: str) -> EmailM
     msg["To"] = cfg.kindle_emails
     # Kindle only converts *attachments*; the body itself is not used.
     msg.set_content(
-        "Your daily Dutch lesson is attached.\n"
-        "Kindle converts the attached .html file into a document.\n\n"
-        "Veel succes met leren! (Good luck learning!)"
+        "Your daily language lesson is attached (one document, English "
+        "breakdowns for every configured language).\n"
+        "Kindle converts the attached .html file into a document with a "
+        "table of contents you can jump around in.\n\n"
+        "Veel succes en がんばって！ (Good luck!)"
     )
     msg.add_attachment(
         html.encode("utf-8"),

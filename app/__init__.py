@@ -1,3 +1,4 @@
-"""Dutch Daily — a daily beginner Dutch lesson from NOS.nl, delivered to your Kindle."""
+"""Language Daily — daily beginner lessons (Dutch from NOS, Japanese from NHK)
+rendered into one Kindle document."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

@@ -179,19 +179,27 @@ def check_sources(cfg: Config, state: State, profiles: list[LanguageProfile]) ->
             ok = False
             continue
         unseen = [i for i in items if not state.is_seen(profile.code, i.guid)]
-        print(f"  items: {len(items)} ({len(unseen)} not sent yet)")
+        pool = sources.eligible_items(profile, cfg, items, state)
+        print(
+            f"  items: {len(items)} ({len(unseen)} not sent yet, "
+            f"{len(pool)} eligible after the digest filter)"
+        )
         if not items:
             ok = False
             continue
-        item = (unseen or items)[0]
-        print(f"  newest: {item.title}")
-        print(f"  url: {item.url}")
+        # Use the real picker so the report matches what the daily job would send.
         try:
-            article = sources.build_article(profile, cfg, item)
+            article = sources.pick_article(profile, cfg, items, state)
         except Exception as exc:  # noqa: BLE001
             print(f"  ARTICLE FAILED: {exc}")
             ok = False
             continue
+        if article is None:
+            print("  no unseen article left; nothing would be sent today.")
+            ok = False
+            continue
+        print(f"  picked: {article.title}")
+        print(f"  url: {article.url}")
         print(f"  paragraphs: {len(article.paragraphs)}  chars: {len(article.text)}")
         for index, para in enumerate(article.paragraphs[:3], 1):
             print(f"    [{index}] {para[:110]}")

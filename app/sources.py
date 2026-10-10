@@ -16,6 +16,7 @@ Both ultimately produce the same :class:`app.web.Article`.
 from __future__ import annotations
 
 import logging
+import random
 from typing import Optional
 
 from . import web
@@ -30,6 +31,10 @@ _TEASER_TRAILERS = ("続きをみる", "続きを読む", "Read more", "Lees ver
 
 # A description shorter than this is treated as a teaser, not the article.
 _MIN_COMPLETE_DESCRIPTION_CHARS = 150
+
+# How many candidates we are willing to build before giving up on the length
+# check (each build may fetch the article page for the languages that need it).
+_MAX_CANDIDATE_TRIES = 8
 
 
 def _strip_trailers(text: str) -> str:
@@ -48,10 +53,38 @@ def fetch_items(profile: LanguageProfile, cfg: Config) -> list[web.FeedItem]:
     return items
 
 
+def _is_excluded(profile: LanguageProfile, item: web.FeedItem) -> bool:
+    """True for known non-articles: daily digests and podcast teasers."""
+    title = item.title.strip().lower()
+    return any(
+        title.startswith(prefix.lower()) for prefix in profile.exclude_title_prefixes
+    )
+
+
+def eligible_items(
+    profile: LanguageProfile, cfg: Config, items: list[web.FeedItem], state: State
+) -> list[web.FeedItem]:
+    """Feed items that could be sent: not already delivered, not a digest.
+
+    The whole feed window counts as the candidate pool (NOS: ~20 items spanning
+    ~13 hours), so a normal run chooses from ~20 articles instead of only the
+    newest one. With ``ALLOW_REPEATS`` the already-sent items are allowed back in.
+    """
+    unseen = [i for i in items if not state.is_seen(profile.code, i.guid)]
+    if not unseen:
+        unseen = list(items) if cfg.allow_repeats else []
+    return [i for i in unseen if not _is_excluded(profile, i)]
+
+
 def pick_article(
     profile: LanguageProfile, cfg: Config, items: list[web.FeedItem], state: State
 ) -> Optional[web.Article]:
-    """Pick the newest article we have not sent yet.
+    """Pick an article we have not sent yet, out of the whole feed window.
+
+    Digest-like items (NOS's morning "Wekdienst" briefing, "Podcast De Dag") are
+    dropped first. A profile with ``pick_random`` then draws one of the remaining
+    candidates at random, so consecutive days differ; otherwise the newest
+    eligible item is used.
 
     Returns ``None`` when every item has already been delivered and repeats are
     not allowed, so a slow feed yields a "nothing new today" note instead of
@@ -65,8 +98,25 @@ def pick_article(
             len(items),
         )
         return None
-    candidates = unseen or items
-    for item in candidates[:6]:
+    pool = eligible_items(profile, cfg, items, state)
+    if not pool:
+        # Every candidate looked like a digest - a briefing still beats nothing.
+        log.info(
+            "[%s] All %d candidate(s) were digests; falling back to the whole feed.",
+            profile.code,
+            len(unseen),
+        )
+        pool = list(unseen or items)
+    if profile.pick_random:
+        random.shuffle(pool)
+    log.info(
+        "[%s] %d candidate(s) of %d feed item(s); %s.",
+        profile.code,
+        len(pool),
+        len(items),
+        "picking one at random" if profile.pick_random else "taking the newest eligible",
+    )
+    for item in pool[:_MAX_CANDIDATE_TRIES]:
         article = build_article(profile, cfg, item)
         if len(article.text) >= profile.min_article_chars:
             return article
@@ -76,8 +126,8 @@ def pick_article(
             item.title,
             len(article.text),
         )
-    # Last resort: whatever the newest item gives us.
-    return build_article(profile, cfg, candidates[0])
+    # Last resort: whatever the first eligible item gives us.
+    return build_article(profile, cfg, pool[0])
 
 
 def build_article(
@@ -97,18 +147,19 @@ def build_article(
 def _build_nos_article(cfg: Config, item: web.FeedItem) -> web.Article:
     """Build an Article, keeping real <p> paragraphs from the feed description.
 
-    NOS feed descriptions carry the full article as <p> paragraphs, so we use
-    them for paragraph-by-paragraph translations. The JSON-LD body is still
-    fetched as an authoritative fallback.
+    NOS feed descriptions carry the full article as <p> paragraphs (verified
+    identical to the article page's JSON-LD ``articleBody``), so the page is
+    only fetched when the description turns out to be unusable - which keeps
+    scanning a whole window of candidates cheap.
     """
-    body = ""
-    try:
-        page = web.get(item.url, cfg.http_timeout)
-        body = web.jsonld_article_body(page)
-    except Exception:  # noqa: BLE001 - network hiccups should not kill the run
-        body = ""
     paragraphs = web.paragraphs_from_html(item.summary_html)
+    body = ""
     if not paragraphs:
+        try:
+            page = web.get(item.url, cfg.http_timeout)
+            body = web.jsonld_article_body(page)
+        except Exception:  # noqa: BLE001 - network hiccups must not kill the run
+            body = ""
         fallback = body or web.html_to_text(item.summary_html)
         paragraphs = [ln for ln in fallback.splitlines() if ln.strip()]
         if not paragraphs and fallback:

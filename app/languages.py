@@ -36,6 +36,14 @@ class LanguageProfile:
     vocab_heading: str = "Key Vocabulary"
     grammar_heading: str = "Key Grammar Points"
     word_building_heading: str = "Word building"
+    # --- Selection ---
+    # True: the whole unseen feed window is the candidate pool and one article
+    # is drawn at random (lots of day-to-day variety). False: always take the
+    # newest unseen article.
+    pick_random: bool = False
+    # Titles starting with one of these are never picked - daily digests and
+    # podcast teasers are not real articles. Matched case-insensitively.
+    exclude_title_prefixes: tuple[str, ...] = ()
     # --- Limits / thresholds ---
     min_article_chars: int = 200  # retry the next feed item below this
     max_grammar_points: int = 5
@@ -57,6 +65,11 @@ DUTCH = LanguageProfile(
     more_example="nl",
     article_heading="The article - Dutch and English, paragraph by paragraph",
     word_building_heading="Word building - words from today's article",
+    # The feed window (~20 items / ~13 hours) is the pool; pick randomly so the
+    # lesson is not always the newest item. NOS's morning "Wekdienst" briefing
+    # and the "Podcast De Dag" teaser are digests, not articles.
+    pick_random=True,
+    exclude_title_prefixes=("Wekdienst", "Podcast De Dag"),
     min_article_chars=200,
     max_grammar_points=5,
     max_word_building=5,

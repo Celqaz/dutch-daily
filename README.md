@@ -12,7 +12,7 @@ straight from Contents to the Dutch or the Japanese half — and back.
 
 ```mermaid
 flowchart LR
-    A[NOS.nl RSS] -->|newest unseen| B[Dutch lesson]
+    A[NOS.nl RSS] -->|random eligible| B[Dutch lesson]
     H[Japanese RSS<br/>nhkeasier.com] -->|newest unseen| I[Japanese lesson]
     B --> L[One HTML document<br/>with a linked TOC]
     I --> L
@@ -27,8 +27,14 @@ flowchart LR
 1. **05:00 UTC** the container wakes up (picked to sit in DeepSeek's off-peak
    window — verify the window on https://platform.deepseek.com).
 2. For **every language in `LANGUAGES`** it pulls that language's RSS feed and
-   picks the **newest article it hasn't already sent** (`data/state.json`
-   remembers per language, so you never get repeats).
+   picks **one article it hasn't already sent** (`data/state.json` remembers per
+   language, so you never get repeats). The **whole feed window** is the pool -
+   the NOS feed holds ~20 items spanning ~13 hours - so a run chooses from ~20
+   articles, not just the newest one. Digest entries are dropped first (NOS's
+   morning **Wekdienst** briefing and the **Podcast De Dag** teaser), and Dutch
+   then **draws one candidate at random** for day-to-day variety (`nl` profile:
+   `pick_random=True` in `app/languages.py`); languages without that flag still
+   take the newest unseen article.
 3. It grabs the article text and sends it to the **LLM** (Anthropic Claude or
    DeepSeek), which produces a structured, beginner-friendly lesson **in English**.
 4. All lessons are rendered into **one HTML document** with a table of contents: a

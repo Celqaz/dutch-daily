@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import epub, kindle, lesson, render, sources
+from . import epub, kindle, lesson, render, sources, travel
 from .config import Config, get_config
 from .languages import LanguageProfile, UnknownLanguage, get_profile, parse_languages
 from .lesson import LessonError
@@ -81,20 +81,40 @@ def run_job(
     """One daily document: feeds -> articles -> lessons -> single HTML -> email."""
     profiles = profiles or _profiles_for(cfg)
     sections = build_sections(cfg, state, profiles)
-    if not any(section.ok for section in sections):
+
+    # Travel Japanese block: date-driven course, no RSS source. Its failure is
+    # isolated just like a language, so the news lessons still ship.
+    travel_section = None
+    if cfg.travel_ja_enabled:
+        try:
+            travel_section = travel.build_travel_section(cfg)
+            log.info(
+                "[travel] Day %d generated (%s).",
+                travel_section.day,
+                travel_section.title,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception("[travel] Section failed: %s", exc)
+            travel_section = render.TravelSection(
+                day=travel.day_for(cfg).day, error=str(exc)
+            )
+
+    if not any(section.ok for section in sections) and not (
+        travel_section is not None and travel_section.ok
+    ):
         raise RuntimeError("No lesson could be generated for any configured language.")
 
     # 1) Render every language into ONE document - as HTML (browser preview,
     #    Kindle's converter) and as EPUB (KOReader, pulled via OPDS) - and always
     #    keep a local copy of both.
-    html = render.render_document(sections, cfg)
+    html = render.render_document(sections, cfg, travel_section)
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     filename = f"language-daily-{_stamp(cfg)}.html"
     epub_name = f"language-daily-{_stamp(cfg)}.epub"
     out_path = cfg.output_dir / filename
     out_path.write_text(html, encoding="utf-8")
     epub_path = cfg.output_dir / epub_name
-    epub.write_epub(epub_path, sections, cfg)
+    epub.write_epub(epub_path, sections, cfg, travel_section)
     log.info("Saved preview: %s (%d bytes) and %s (%d bytes)", out_path, out_path.stat().st_size, epub_path, epub_path.stat().st_size)
 
     # Record the articles BEFORE emailing so a retry cannot re-send the same stories.
@@ -107,6 +127,11 @@ def run_job(
             "guid": section.article.guid,
             "title": section.article.title,
             "url": section.article.url,
+        }
+    if travel_section is not None and travel_section.ok:
+        delivered["travel"] = {
+            "day": travel_section.day,
+            "title": travel_section.title,
         }
     first = next(
         (s.article for s in sections if s.ok and s.article is not None), None
@@ -145,7 +170,7 @@ def run_job(
                 for section in sections
                 if section.ok and section.article is not None
             )
-            subject = f"{render.document_title(cfg, sections)}: {titles}"[:120]
+            subject = f"{render.document_title(cfg, sections, travel_section)}: {titles}"[:120]
             payloads: list[tuple[str, bytes]] = []
             for name in cfg.attachments_for(filename, epub_name):
                 payloads.append((name, (cfg.output_dir / name).read_bytes()))

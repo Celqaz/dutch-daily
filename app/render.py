@@ -52,6 +52,8 @@ _CSS = """
   ul { margin-top: 0.2em; }
   li { margin-bottom: 0.35em; }
   .backtotoc { margin-top: 1em; font-size: 0.9em; }
+  .answers { margin-top: 0.6em; padding: 0.5em 0.6em;
+             background: #f3f4f6; border-left: 3px solid #0b7285; }
   .unavailable { color: #991b1b; }
   .footer { margin-top: 1.5em; color: #9ca3af; font-size: 0.75em;
             border-top: 1px solid #e5e7eb; padding-top: 0.5em; }
@@ -76,6 +78,27 @@ class Section:
     @property
     def heading(self) -> str:
         return f"{self.profile.name} - {self.profile.native_name}"
+
+
+TRAVEL_ANCHOR = "travel"
+
+
+@dataclass
+class TravelSection:
+    """The travel-Japanese block: a date-driven course, not a news article."""
+
+    day: int = 0
+    title: str = ""
+    lesson: Optional[dict[str, Any]] = None
+    error: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        return self.lesson is not None
+
+    @property
+    def heading(self) -> str:
+        return "旅行日语 · Travel Japanese"
 
 
 def _esc(value: Any) -> str:
@@ -119,7 +142,24 @@ def toc_entries(section: Section) -> list[tuple[str, str]]:
     return entries
 
 
-def _toc(sections: list[Section]) -> str:
+def travel_toc_entries(section: TravelSection) -> list[tuple[str, str]]:
+    """(label, anchor) for the travel sub-sections that actually have content."""
+    lesson = section.lesson or {}
+    entries: list[tuple[str, str]] = []
+    if lesson.get("core_sentences"):
+        entries.append(("核心句", _anchor(TRAVEL_ANCHOR, "core")))
+    if lesson.get("dialogue"):
+        entries.append(("迷你对话", _anchor(TRAVEL_ANCHOR, "dialogue")))
+    if lesson.get("number_practice"):
+        entries.append(("数字/价格练习", _anchor(TRAVEL_ANCHOR, "numbers")))
+    if lesson.get("listening_quiz"):
+        entries.append(("听力小测", _anchor(TRAVEL_ANCHOR, "listening")))
+    if lesson.get("reading_challenge"):
+        entries.append(("今日跟读挑战", _anchor(TRAVEL_ANCHOR, "challenge")))
+    return entries
+
+
+def _toc(sections: list[Section], travel_section: Optional[TravelSection] = None) -> str:
     parts = [
         '<a id="toc"></a>',
         '<div class="toc">',
@@ -132,6 +172,19 @@ def _toc(sections: list[Section]) -> str:
         if not section.ok:
             parts.append(' <span class="note">- not available today</span>')
         entries = toc_entries(section)
+        if entries:
+            parts.append("<ul>")
+            for label, anchor in entries:
+                parts.append(f'<li><a href="#{anchor}">{_esc(label)}</a></li>')
+            parts.append("</ul>")
+        parts.append("</li>")
+    if travel_section is not None:
+        parts.append(
+            f'<li><a href="#{TRAVEL_ANCHOR}"><b>{_esc(travel_section.heading)}</b></a>'
+        )
+        if not travel_section.ok:
+            parts.append(' <span class="note">- not available today</span>')
+        entries = travel_toc_entries(travel_section)
         if entries:
             parts.append("<ul>")
             for label, anchor in entries:
@@ -326,14 +379,135 @@ def _render_section(section: Section) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Travel Japanese section                                                      #
+# --------------------------------------------------------------------------- #
+
+
+def _travel_head(p: dict) -> str:
+    """Japanese line + reading + romaji, without the translation."""
+    head = _pair(_esc(p.get("japanese") or ""), _esc(p.get("reading") or ""))
+    romaji = _esc(p.get("romaji") or "")
+    if romaji:
+        head += _romaji_span(romaji)
+    return head
+
+
+def _travel_phrase(p: dict) -> str:
+    """Japanese line + reading + romaji + Chinese meaning."""
+    chinese = _esc(p.get("chinese") or "")
+    return f"{_travel_head(p)} &mdash; {chinese}"
+
+
+def _render_travel_section(section: TravelSection) -> str:
+    parts = [f'<h1 class="lang" id="{TRAVEL_ANCHOR}">{_esc(section.heading)}</h1>']
+    if not section.ok:
+        parts.append(
+            '<p class="unavailable">This section could not be generated today'
+            f" ({_esc(section.error or 'unknown error')}).</p>"
+        )
+        parts.append('<p class="backtotoc"><a href="#toc">Back to contents</a></p>')
+        return "\n".join(parts)
+
+    lesson = section.lesson or {}
+    parts.append(
+        f'<p class="meta">第 {section.day} 天 &middot; {_esc(section.title or "")}</p>'
+    )
+    intro = _esc(lesson.get("intro") or "")
+    if intro:
+        parts.append(f"<p>{intro}</p>")
+
+    core = lesson.get("core_sentences") or []
+    if core:
+        parts.append(
+            f'<h2 class="section-head" id="{_anchor(TRAVEL_ANCHOR, "core")}">'
+            "今日核心句</h2><ol>"
+        )
+        for item in core:
+            parts.append(f"<li>{_travel_phrase(item)}</li>")
+        parts.append("</ol>")
+
+    dialogue = lesson.get("dialogue") or []
+    if dialogue:
+        parts.append(
+            f'<h2 class="section-head" id="{_anchor(TRAVEL_ANCHOR, "dialogue")}">'
+            "迷你对话</h2>"
+        )
+        for line in dialogue:
+            speaker = _esc(line.get("speaker") or "")
+            parts.append(
+                '<div class="pair">'
+                f'<p class="target"><b>{speaker}：</b>{_travel_phrase(line)}</p>'
+                "</div>"
+            )
+
+    numbers = lesson.get("number_practice") or []
+    if numbers:
+        parts.append(
+            f'<h2 class="section-head" id="{_anchor(TRAVEL_ANCHOR, "numbers")}">'
+            "数字/价格练习</h2><ol>"
+        )
+        for item in numbers:
+            parts.append(f"<li>{_travel_phrase(item)}</li>")
+        parts.append("</ol>")
+
+    quiz = lesson.get("listening_quiz") or []
+    if quiz:
+        parts.append(
+            f'<h2 class="section-head" id="{_anchor(TRAVEL_ANCHOR, "listening")}">'
+            "听力小测</h2>"
+        )
+        parts.append("<p>店员说这句话，是什么意思？答案在文末。</p>")
+        for item in quiz:
+            parts.append(
+                f'<blockquote><p class="src-example">{_travel_head(item)}</p></blockquote>'
+            )
+
+    challenge = lesson.get("reading_challenge") or {}
+    if challenge.get("japanese"):
+        parts.append(
+            f'<h2 class="section-head" id="{_anchor(TRAVEL_ANCHOR, "challenge")}">'
+            "今日跟读挑战</h2>"
+        )
+        parts.append(f'<p class="target"><b>{_travel_phrase(challenge)}</b></p>')
+        hint = _esc(challenge.get("hint") or "")
+        if hint:
+            parts.append(f'<p class="tip"><b>提示：</b>{hint}</p>')
+
+    # Exercise answers, kept at the end of the block.
+    answers: list[str] = []
+    for index, item in enumerate(numbers, 1):
+        answers.append(
+            f"{index}. {_esc(item.get('chinese') or '')} → "
+            f"{_esc(item.get('answer') or '')}"
+        )
+    for item in quiz:
+        answers.append(
+            f"听力：{_esc(item.get('japanese') or '')} = "
+            f"{_esc(item.get('chinese') or '')}"
+        )
+    if answers:
+        parts.append('<h2 class="section-head">答案</h2><div class="answers"><ul>')
+        for line in answers:
+            parts.append(f"<li>{line}</li>")
+        parts.append("</ul></div>")
+
+    parts.append('<p class="backtotoc"><a href="#toc">Back to contents</a></p>')
+    return "\n".join(part for part in parts if part)
+
+
+# --------------------------------------------------------------------------- #
 # Document                                                                     #
 # --------------------------------------------------------------------------- #
 
 
-def document_title(cfg: Config, sections: list[Section]) -> str:
-    names = " + ".join(section.profile.name for section in sections)
+def document_title(
+    cfg: Config, sections: list[Section], travel_section: Optional[TravelSection] = None
+) -> str:
+    names = [section.profile.name for section in sections]
+    if travel_section is not None:
+        names.append("旅行日语")
     stamp = datetime.now(ZoneInfo(cfg.timezone)).strftime("%Y-%m-%d")
-    return f"{names or 'Language'} Daily {stamp}"
+    return f"{' + '.join(names) or 'Language'} Daily {stamp}"
 
 
 def document_date(cfg: Config) -> str:
@@ -355,23 +529,29 @@ def render_styles() -> str:
     return _CSS
 
 
-def render_body(sections: list[Section], cfg: Config) -> str:
+def render_body(
+    sections: list[Section],
+    cfg: Config,
+    travel_section: Optional[TravelSection] = None,
+) -> str:
     """Inner document body: title, TOC, one block per language, footer.
 
     This is what both the standalone HTML file and the EPUB content document
-    render, so the two stay identical (anchors included).
+    render, so the two stay identical (anchors included). The optional travel
+    block is appended after the language sections.
     """
-    title = document_title(cfg, sections)
-    blocks = "\n<hr class=\"divider\"/>\n".join(
-        _render_section(section) for section in sections
-    )
+    title = document_title(cfg, sections, travel_section)
+    blocks = [f"{_render_section(section)}" for section in sections]
+    if travel_section is not None:
+        blocks.append(_render_travel_section(travel_section))
+    blocks_html = "\n<hr class=\"divider\"/>\n".join(blocks)
     return f"""\
   <div class="doc-title">{_esc(title)}</div>
   <p class="meta">Daily reading practice &middot; {_esc(document_date(cfg))}</p>
 
-  {_toc(sections)}
+  {_toc(sections, travel_section)}
 
-  {blocks}
+  {blocks_html}
 
   <div class="footer">
     <p>Generated automatically for your daily language practice. Vocab and
@@ -380,9 +560,13 @@ def render_body(sections: list[Section], cfg: Config) -> str:
   </div>"""
 
 
-def render_document(sections: list[Section], cfg: Config) -> str:
+def render_document(
+    sections: list[Section],
+    cfg: Config,
+    travel_section: Optional[TravelSection] = None,
+) -> str:
     """Full standalone HTML document (browser preview + email attachment)."""
-    title = document_title(cfg, sections)
+    title = document_title(cfg, sections, travel_section)
     return f"""\
 <html>
 <head>
@@ -391,7 +575,7 @@ def render_document(sections: list[Section], cfg: Config) -> str:
 <style>{_CSS}</style>
 </head>
 <body>
-{render_body(sections, cfg)}
+{render_body(sections, cfg, travel_section)}
 </body>
 </html>
 """

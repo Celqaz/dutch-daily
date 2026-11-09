@@ -79,10 +79,15 @@ def _extract_text(content) -> str:
     return "\n".join(parts)
 
 
-def build_lesson(
-    article: Article, cfg: Config, profile: LanguageProfile
+def complete_json(
+    cfg: Config, system_prompt: str, user_content: str, what: str = "lesson"
 ) -> dict[str, Any]:
-    """Ask the LLM for a structured lesson about this article, normalised for rendering."""
+    """Call the LLM once and parse its JSON answer into a dict.
+
+    Shared by the article lessons and the travel-phrase lesson so both get the
+    same client setup (bounded timeout, DeepSeek thinking disabled, tolerant
+    JSON extraction). Raises :class:`LessonError` on any failure.
+    """
     if not cfg.anthropic_api_key:
         raise LessonError(
             "ANTHROPIC_API_KEY is not set — add it to .env (see README)."
@@ -99,6 +104,48 @@ def build_lesson(
         client_kwargs["base_url"] = cfg.anthropic_base_url
     client = anthropic.Anthropic(**client_kwargs)
 
+    # Newer anthropic SDKs (1.x) removed the top-level `temperature` parameter
+    # from messages.create(), so we rely on the model default.
+    #
+    # DeepSeek's v4 models are "thinking" models that reason by default on this
+    # endpoint. That is slow and can eat the whole token budget, producing NO
+    # text block at all. Disabling thinking keeps responses fast (~15-20s) with
+    # clean text. Real Anthropic rejects {"type": "disabled"}, so only send it
+    # when pointed at DeepSeek.
+    request_kwargs: dict = {
+        "model": cfg.claude_model,
+        "max_tokens": 8192,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": user_content}],
+    }
+    if "deepseek" in cfg.anthropic_base_url.lower():
+        request_kwargs["thinking"] = {"type": "disabled"}
+
+    try:
+        response = client.messages.create(**request_kwargs)
+    except Exception as exc:  # noqa: BLE001
+        raise LessonError(
+            f"LLM API call failed for {what} ({cfg.claude_model}): {exc}"
+        ) from exc
+
+    raw_text = _extract_text(response.content).strip()
+    if not raw_text:
+        raise LessonError(f"The model returned no text content for {what}.")
+
+    try:
+        obj = json.loads(_first_json_block(raw_text))
+    except json.JSONDecodeError as exc:
+        raise LessonError(f"Could not parse {what} JSON from model: {exc}") from exc
+
+    if not isinstance(obj, dict):
+        raise LessonError(f"Expected a JSON object {what}, got something else.")
+    return obj
+
+
+def build_lesson(
+    article: Article, cfg: Config, profile: LanguageProfile
+) -> dict[str, Any]:
+    """Ask the LLM for a structured lesson about this article, normalised for rendering."""
     max_chars, _ = cfg.limits_for(profile.code)
     paragraphs = article.paragraphs or [article.text]
     readings = (
@@ -127,41 +174,9 @@ def build_lesson(
         f"{profile.output_schema}"
     )
 
-    try:
-        # Newer anthropic SDKs (1.x) removed the top-level `temperature`
-        # parameter from messages.create(), so we rely on the model default.
-        #
-        # DeepSeek's v4 models are "thinking" models that reason by default on
-        # this endpoint. That is slow and can eat the whole token budget,
-        # producing NO text block at all. Disabling thinking keeps responses
-        # fast (~15-20s) with clean text. Real Anthropic rejects
-        # {"type": "disabled"}, so only send it when pointed at DeepSeek.
-        request_kwargs: dict = {
-            "model": cfg.claude_model,
-            "max_tokens": 8192,
-            "system": profile.system_prompt,
-            "messages": [{"role": "user", "content": user_content}],
-        }
-        if "deepseek" in cfg.anthropic_base_url.lower():
-            request_kwargs["thinking"] = {"type": "disabled"}
-        response = client.messages.create(**request_kwargs)
-    except Exception as exc:  # noqa: BLE001
-        raise LessonError(
-            f"LLM API call failed for {profile.name} ({cfg.claude_model}): {exc}"
-        ) from exc
-
-    raw_text = _extract_text(response.content).strip()
-    if not raw_text:
-        raise LessonError(f"The model returned no text content for {profile.name}.")
-
-    try:
-        lesson = json.loads(_first_json_block(raw_text))
-    except json.JSONDecodeError as exc:
-        raise LessonError(f"Could not parse lesson JSON from model: {exc}") from exc
-
-    if not isinstance(lesson, dict):
-        raise LessonError("Expected a JSON object lesson, got something else.")
-
+    lesson = complete_json(
+        cfg, profile.system_prompt, user_content, what=f"{profile.name} lesson"
+    )
     normalized = _normalize(lesson, profile, cfg)
     _apply_source_readings(normalized, article)
     return normalized

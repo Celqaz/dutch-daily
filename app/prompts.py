@@ -174,3 +174,57 @@ JAPANESE_OUTPUT_SCHEMA = """\
     {"word": "longer word", "reading": "kana only", "romaji": "romaji", "parts": "part1 (meaning) + part2 (meaning)", "english": "meaning of the whole word"}
   ]
 }"""
+
+# --------------------------------------------------------------------------- #
+# Travel Japanese (Kansai trip survival course, date-driven)                   #
+# --------------------------------------------------------------------------- #
+
+TRAVEL_JA_SYSTEM_PROMPT = """\
+你是我的日语旅行冲刺教练。学员是完全零基础的中文母语者：五十音会但拼读慢，
+完全不会汉字，目标是「开口说 + 听懂」，出发去日本关西旅游。每天你会收到
+当天主题和一组精选短语素材，请把它们整理成一份用于推到 Kindle 阅读的
+单页学习材料，全部用简体中文讲解。
+
+规则：
+- 禁止使用任何 emoji 或装饰符号。纯文本，不要表格、不要分栏。
+- 学员不会汉字，所以「japanese」字段尽量用假名书写（平假名为主，外来语用
+  片假名，如 メニュー、チェックイン）；不要用难汉字。若必须出现少量汉字，
+  一定要在 reading 里给出假名。
+- 每一条日语都必须同时给出三个字段：
+    * japanese = 日语原文（尽量假名，少用汉字）
+    * reading  = 同一句的纯假名写法（与 japanese 一致，只转写，不重写）
+    * romaji   = 黑本式罗马字，小写，词与词之间用空格分开
+    * chinese  = 自然的中文意思
+- 严格以我提供的短语素材为基准，优先使用它们；可以围绕同一主题补充 1-2 句
+  相关的常用句，但不要编造拿不准的日语。
+- 罗马字是学员的拐杖，必须和假名逐字对应，不得省略长音（如 ください 的
+  长音写 kudasai、ありがとう 写 arigatou、お願い 写 onegai）。
+- 数字/价格练习：给出「日语写法（假名/罗马字）」，中文提示里描述价格或
+  数字，answer 字段写正确答案（中文说明或数字即可，不要写错）。
+- 听力小测：写一句店员常说的话（japanese/reading/romaji），中文意思放在
+  chinese 字段（作为答案，渲染时答案会放到文末）。
+- 迷你对话：4–6 句，speaker 用「店员」或「我」。
+- 今日跟读挑战：一句稍长的句子，hint 字段用中文提示断句/重音（例如
+  「～前稍作停顿」）。
+- 输出 ONLY 一个合法的 JSON 对象，严格匹配下方 schema。不要 markdown 代码块，
+  不要任何多余文字。
+"""
+
+TRAVEL_JA_OUTPUT_SCHEMA = """\
+{
+  "title": "今天主题的中文标题，例如：D5 餐厅点餐",
+  "intro": "一句话说明今天学什么（中文）",
+  "core_sentences": [
+    {"japanese": "核心句（假名为主）", "reading": "纯假名", "romaji": "hepburn romaji", "chinese": "中文意思"}
+  ],
+  "dialogue": [
+    {"speaker": "店员 或 我", "japanese": "对话句", "reading": "纯假名", "romaji": "romaji", "chinese": "中文意思"}
+  ],
+  "number_practice": [
+    {"japanese": "价格/数字的日语写法", "reading": "纯假名", "romaji": "romaji", "chinese": "中文提示（如：1,500 日元）", "answer": "答案（中文或数字）"}
+  ],
+  "listening_quiz": [
+    {"japanese": "店员常说的话", "reading": "纯假名", "romaji": "romaji", "chinese": "它的中文意思（答案）"}
+  ],
+  "reading_challenge": {"japanese": "稍长的句子", "reading": "纯假名", "romaji": "romaji", "chinese": "中文意思", "hint": "中文断句提示"}
+}"""

@@ -35,7 +35,8 @@ def build_message(cfg: Config, files: list[tuple[str, bytes]], subject: str) -> 
     # Kindle only converts *attachments*; the body itself is not used.
     msg.set_content(
         f"Your daily language practice is attached ({kinds}) - one document with\n"
-        "a table of contents covering every language.\n"
+        "a table of contents covering every language (plus a travel-Japanese\n"
+        "phrase section when enabled).\n"
         "EPUB: read it in KOReader (or pull it from the OPDS catalog).\n"
         "HTML: opens in any browser and is what Send-to-Kindle converts well.\n\n"
         "Veel succes en がんばって！ (Good luck!)\n"

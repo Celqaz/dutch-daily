@@ -21,12 +21,15 @@ from pathlib import Path
 
 from .config import Config
 from .render import (
+    TRAVEL_ANCHOR,
     Section,
+    TravelSection,
     document_title,
     languages_of,
     render_body,
     render_styles,
     toc_entries,
+    travel_toc_entries,
 )
 
 MIMETYPE = "application/epub+zip"
@@ -80,7 +83,9 @@ def _title_template(title: str) -> str:
 """
 
 
-def _nav_xhtml(title: str, sections: list[Section], lang: str) -> str:
+def _nav_xhtml(
+    title: str, sections: list[Section], lang: str, travel_section: TravelSection | None = None
+) -> str:
     items: list[str] = []
     for section in sections:
         code = section.profile.code
@@ -97,6 +102,20 @@ def _nav_xhtml(title: str, sections: list[Section], lang: str) -> str:
             )
         else:
             items.append(f'      <li><a href="text.xhtml#{code}">{label}</a></li>')
+    if travel_section is not None:
+        label = _esc(travel_section.heading)
+        entries = travel_toc_entries(travel_section)
+        if entries:
+            children = "\n".join(
+                f'          <li><a href="text.xhtml#{anchor}">{_esc(text)}</a></li>'
+                for text, anchor in entries
+            )
+            items.append(
+                f'      <li><a href="text.xhtml#{TRAVEL_ANCHOR}">{label}</a>\n'
+                f"        <ol>\n{children}\n        </ol>\n      </li>"
+            )
+        else:
+            items.append(f'      <li><a href="text.xhtml#{TRAVEL_ANCHOR}">{label}</a></li>')
     body = "\n".join(items)
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
@@ -123,7 +142,13 @@ def _nav_xhtml(title: str, sections: list[Section], lang: str) -> str:
 """
 
 
-def _ncx(title: str, sections: list[Section], identifier: str, lang: str) -> str:
+def _ncx(
+    title: str,
+    sections: list[Section],
+    identifier: str,
+    lang: str,
+    travel_section: TravelSection | None = None,
+) -> str:
     """EPUB 2 style NCX; older readers (and some KOReader builds) prefer it."""
     order = 0
     points: list[str] = []
@@ -144,6 +169,25 @@ def _ncx(title: str, sections: list[Section], identifier: str, lang: str) -> str
             f'    <navPoint id="nav-{index}" playOrder="{order - len(children)}">\n'
             f"      <navLabel><text>{_esc(section.heading)}</text></navLabel>\n"
             f'      <content src="text.xhtml#{code}"/>{inner}\n'
+            f"    </navPoint>"
+        )
+    if travel_section is not None:
+        index = len(sections) + 1
+        order += 1
+        children: list[str] = []
+        for child_index, (text, anchor) in enumerate(travel_toc_entries(travel_section), 1):
+            order += 1
+            children.append(
+                f'      <navPoint id="nav-{index}-{child_index}" playOrder="{order}">\n'
+                f"        <navLabel><text>{_esc(text)}</text></navLabel>\n"
+                f'        <content src="text.xhtml#{anchor}"/>\n'
+                f"      </navPoint>"
+            )
+        inner = "\n" + "\n".join(children) + "\n    " if children else ""
+        points.append(
+            f'    <navPoint id="nav-{index}" playOrder="{order - len(children)}">\n'
+            f"      <navLabel><text>{_esc(travel_section.heading)}</text></navLabel>\n"
+            f'      <content src="text.xhtml#{TRAVEL_ANCHOR}"/>{inner}\n'
             f"    </navPoint>"
         )
     nav_map = "\n".join(points)
@@ -193,15 +237,19 @@ def _content_opf(title: str, identifier: str, modified: str, languages: list[str
 """
 
 
-def build_epub(sections: list[Section], cfg: Config) -> bytes:
+def build_epub(
+    sections: list[Section], cfg: Config, travel_section: TravelSection | None = None
+) -> bytes:
     """Render the sections into an EPUB 3 file and return its bytes."""
-    title = document_title(cfg, sections)
+    title = document_title(cfg, sections, travel_section)
     languages = languages_of(sections)
     lang = languages[0] if languages else "en"
     identifier = _package_id(title)
     modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     content = _title_template(title).format(
-        lang=_esc(lang), title=_esc(title), body=xml_safe(render_body(sections, cfg))
+        lang=_esc(lang),
+        title=_esc(title),
+        body=xml_safe(render_body(sections, cfg, travel_section)),
     )
 
     buffer = BytesIO()
@@ -216,14 +264,24 @@ def build_epub(sections: list[Section], cfg: Config) -> bytes:
             f"{_OPF_DIR}/content.opf",
             _content_opf(title, identifier, modified, languages),
         )
-        archive.writestr(f"{_OPF_DIR}/nav.xhtml", _nav_xhtml(title, sections, lang))
-        archive.writestr(f"{_OPF_DIR}/toc.ncx", _ncx(title, sections, identifier, lang))
+        archive.writestr(
+            f"{_OPF_DIR}/nav.xhtml", _nav_xhtml(title, sections, lang, travel_section)
+        )
+        archive.writestr(
+            f"{_OPF_DIR}/toc.ncx",
+            _ncx(title, sections, identifier, lang, travel_section),
+        )
         archive.writestr(f"{_OPF_DIR}/style.css", render_styles())
         archive.writestr(f"{_OPF_DIR}/text.xhtml", content)
     return buffer.getvalue()
 
 
-def write_epub(path: Path, sections: list[Section], cfg: Config) -> Path:
+def write_epub(
+    path: Path,
+    sections: list[Section],
+    cfg: Config,
+    travel_section: TravelSection | None = None,
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(build_epub(sections, cfg))
+    path.write_bytes(build_epub(sections, cfg, travel_section))
     return path

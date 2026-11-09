@@ -5,7 +5,10 @@ containing one lesson per language — by default a real **NOS.nl** Dutch news
 article and a real **Japanese** article. Each one is rewritten by AI into an
 **English study breakdown** for a **total beginner (A1)**: key vocabulary, grammar
 points (with kana + romaji readings for Japanese), word building, and the article
-translated **paragraph by paragraph**.
+translated **paragraph by paragraph**. On top of those it can append a third
+**旅行日语 (Travel Japanese)** block: a date-driven 18-day survival course for
+your trip, taught in **Chinese** (core sentences, mini dialogue, number/price
+practice, a listening quiz and a reading challenge).
 
 The document opens with a **table of contents**, so on the Kindle you can jump
 straight from Contents to the Dutch or the Japanese half — and back.
@@ -14,8 +17,10 @@ straight from Contents to the Dutch or the Japanese half — and back.
 flowchart LR
     A[NOS.nl RSS] -->|random eligible| B[Dutch lesson]
     H[Japanese RSS<br/>nhkeasier.com] -->|newest unseen| I[Japanese lesson]
+    T[18-day course<br/>app/travel.py] -->|date-driven| J[旅行日语 block]
     B --> L[One HTML document<br/>with a linked TOC]
     I --> L
+    J --> L
     L --> E[Gmail SMTP<br/>App Password]
     E --> F[Kindle]
     B -.-> G[(state.json<br/>per-language sent ids)]
@@ -110,6 +115,25 @@ no unseen story left the Japanese section simply says *"no new article today"*
 
 > nhkeasier.com is a third-party mirror of NHK's learner content — fine for
 > personal study, but don't redistribute it.
+
+## Travel Japanese block (Kansai trip)
+
+The optional third section is **not** a news lesson — there is no RSS source. Its
+18-day curriculum (D1 万能句 → D18 出行前复习, transcribed from your study plan)
+lives in `app/travel.py`, and the day is derived from the date:
+
+- course **day 1** starts on `TRAVEL_JA_START` (default `2026-11-10`), so each
+  morning you get the next theme automatically;
+- after day 18 the course **cycles back to day 1** for review, so it keeps
+  delivering after the trip window;
+- each day the LLM turns that theme + its curated source phrases into one page in
+  **Chinese**: 5 core sentences, a 4–6 line mini dialogue, 3 number/price
+  exercises, a listening quiz, and a reading challenge — all with kana + romaji
+  (answers for the exercises are printed at the end of the block).
+
+It is appended after the language sections with its own `#travel` anchor and TOC
+entry (`旅行日语 · Travel Japanese`), and renders identically in HTML and EPUB.
+Set `TRAVEL_JA_ENABLED=false` to switch it off (for example after the trip).
 
 
 ## Option A: use DeepSeek instead of Claude
@@ -218,6 +242,7 @@ kp/
 │   ├── sources.py     # RSS + article text per language (NOS, Japanese)
 │   ├── web.py         # shared HTTP / HTML / RSS / JSON-LD helpers
 │   ├── lesson.py      # LLM call + normalising the lesson JSON
+│   ├── travel.py      # travel-Japanese 18-day course + LLM prompt
 │   ├── render.py      # lessons -> one Kindle HTML document with a TOC
 │   ├── kindle.py      # Gmail SMTP sender
 │   ├── scheduler.py   # daily loop (05:00 UTC)
@@ -256,6 +281,8 @@ Adding a language = one profile in `app/languages.py` (+ a prompt in
 | `MAX_VOCAB` | `12` | Max Dutch vocab entries |
 | `MAX_ARTICLE_CHARS_JA` | `900` | Japanese article length (characters carry more meaning) |
 | `MAX_VOCAB_JA` | `10` | Max Japanese vocab entries |
+| `TRAVEL_JA_ENABLED` | `true` | Append the 旅行日语 (travel Japanese) block to the daily document |
+| `TRAVEL_JA_START` | `2026-11-10` | ISO date of travel-course day 1 (the course cycles after day 18) |
 
 ## Troubleshooting
 

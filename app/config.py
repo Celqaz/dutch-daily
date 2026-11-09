@@ -86,6 +86,12 @@ class Config:
     # and the kana/romaji readings make the generated lesson longer.
     max_article_chars_ja: int = 900
     max_vocab_ja: int = 10
+    # --- Travel Japanese block (date-driven survival course) ---
+    # One extra section appended after the news lessons; no RSS source, the
+    # 18-day curriculum in app/travel.py advances by date and cycles after the
+    # trip window.
+    travel_ja_enabled: bool = True
+    travel_ja_start: str = "2026-11-10"  # ISO date of course day 1
     http_timeout: int = 30
 
     @property
@@ -162,6 +168,8 @@ def get_config() -> Config:
         max_vocab=int(os.environ.get("MAX_VOCAB", "12")),
         max_article_chars_ja=int(os.environ.get("MAX_ARTICLE_CHARS_JA", "900")),
         max_vocab_ja=int(os.environ.get("MAX_VOCAB_JA", "10")),
+        travel_ja_enabled=_env_bool("TRAVEL_JA_ENABLED", True),
+        travel_ja_start=os.environ.get("TRAVEL_JA_START", "2026-11-10"),
         http_timeout=int(os.environ.get("HTTP_TIMEOUT", "30")),
     )
 
